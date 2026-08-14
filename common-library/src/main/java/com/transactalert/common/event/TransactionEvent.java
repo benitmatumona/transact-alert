@@ -1,9 +1,9 @@
 public class TransactionEvent implements Serializable{
-    private String transactionId;
-    private String customerId;
-    private double amount;
-    private String merchant;
-    private String location;
+    private final String transactionId;
+    private final String customerId;
+    private final double amount;
+    private final String merchant;
+    private final String location;
 
     public TransactionEvent(
         String transactionId,
