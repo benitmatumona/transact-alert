@@ -7,7 +7,7 @@ public class TransactionEvent implements Serializable{
 
     public TransactionEvent(
         String transactionId,
-        String customerId.
+        String customerId,
         double amount,
         String merchant,
         String location
@@ -21,23 +21,23 @@ public class TransactionEvent implements Serializable{
 
     public TransactionEvent() {};
 
-    public getTransactionId(){
+    public String getTransactionId(){
         return transactionId;
     }
     
-    public getCustomerId(){ 
+    public String getCustomerId(){ 
         return customerId;
     }
     
-    public getAmount(){ 
+    public double getAmount(){ 
         return amount;
     }
     
-    public getMerchant(){ 
+    public String getMerchant(){ 
         return merchant;
     }
     
-    public getLocation(){ 
+    public String getLocation(){ 
         return location;
     }
 }
