@@ -1,0 +1,11 @@
+version: "3.8"
+services:
+  artemis:
+    image: apache/activemq-artemis:latest
+    container_name: artemis-broker
+    ports:
+      - "61616:61616"   # JMS port — this is what our app connects to
+      - "8161:8161"     # Web console — for us to look at the queue in a browser
+    environment:
+      ARTEMIS_USER: artemis
+      ARTEMIS_PASSWORD: artemis
