@@ -1,3 +1,5 @@
+package com.transactalert.common.event;
+
 public class TransactionEvent implements Serializable{
     private final String transactionId;
     private final String customerId;
