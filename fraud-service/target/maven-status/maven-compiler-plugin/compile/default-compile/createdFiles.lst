@@ -1,0 +1,3 @@
+com/transactalert/fraud/rules/FraudRuleEngine.class
+com/transactalert/fraud/consumer/FraudConsumer.class
+com/transactalert/fraud/FraudServiceApplication.class
