@@ -6,6 +6,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @SpringBootApplication
 public class FraudServiceApplication {
     public static void main(String[] args) {
-        SpringBootApplication.run(FraudServiceApplication.class, args);
+        SpringApplication.run(FraudServiceApplication.class, args);
     }
 }
