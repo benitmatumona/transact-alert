@@ -1,160 +1,191 @@
 # TransactAlert — Asynchronous Fraud Alert Service
 
 ![Java](https://img.shields.io/badge/Java-17-orange)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.x-green)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.0-green)
 ![JMS](https://img.shields.io/badge/JMS-Asynchronous%20Messaging-blue)
 ![ActiveMQ Artemis](https://img.shields.io/badge/Message%20Broker-ActiveMQ%20Artemis-purple)
 ![REST](https://img.shields.io/badge/API-REST%2FJSON-lightgrey)
+![Docker](https://img.shields.io/badge/Infrastructure-Docker-blue)
 
 ## Overview
 
-TransactAlert is an event-driven fraud detection platform. It accepts bank
-transactions over a REST API, hands them off to a message broker instead of
-processing them immediately, and lets a separate service check each one for
-fraud in the background. When something looks suspicious, an alert is
-raised and a third service picks it up to notify a fraud analyst.
+TransactAlert is a three-service, event-driven fraud detection system built
+with Java, Spring Boot, and JMS. It accepts bank transactions over a REST
+API, publishes them to a message broker, evaluates each one against
+rule-based fraud logic in a fully independent service, and forwards any
+flagged transaction to a notification service — all without the ingesting
+API ever waiting on fraud analysis.
 
-The point of building it this way: the API that accepts transactions never
-has to wait on fraud-checking logic, so it stays fast and available even if
-fraud checking is slow, busy, or briefly down.
+Every service runs and scales independently. They share no code except a
+small common library that defines the message formats they agree on.
 
 ## Business Problem
 
-Banks process huge numbers of transactions per second. If fraud checking
-happens *inline* — as part of the same request that accepts the
-transaction — then:
+Financial institutions process high volumes of transactions and cannot
+afford for fraud analysis to block transaction ingestion. A synchronous
+design — where the API waits for a full fraud check before responding —
+creates slow customer-facing responses, tight coupling between unrelated
+concerns, and poor scalability under load.
 
-- customers wait longer for a response
-- the ingestion API and the fraud logic are stuck rising and falling together
-- a slow or broken fraud check can take down transaction ingestion too
-
-TransactAlert splits these two jobs apart so a problem in one doesn't
-become a problem in the other.
+TransactAlert solves this by fully separating ingestion from analysis:
+each is its own deployable service, and they interact only through
+asynchronous messages on a broker.
 
 ## Architecture
 
 ```
-        Client (bank / payment system)
-                    |
-                    v
-        transaction-service  (REST API)
-        - validates the transaction
-        - publishes it to a JMS queue
-                    |
-                    v
-        ActiveMQ Artemis (message broker)
-        - transaction.queue
-                    |
-                    v
-        fraud-service  (consumer)
-        - picks up transactions from the queue
-        - runs fraud rules
-        - publishes an Alert if something looks wrong
-                    |
-                    v
-        ActiveMQ Artemis
-        - fraud.alert.topic
-                    |
-                    v
-        notification-service  (consumer)
-        - picks up alerts
-        - notifies a fraud analyst
+              Client Application
+                      |
+                      v
+            transaction-service (REST API, port 8081)
+            - validates the request
+            - publishes a TransactionEvent
+                      |
+                      v
+                fraud.queue
+                      |
+                      v
+              fraud-service (JMS consumer)
+            - FraudRuleEngine calculates a risk score
+            - if score >= 50, publishes a FraudAlertEvent
+                      |
+                      v
+                fraud.alerts
+                      |
+                      v
+           notification-service (JMS consumer)
+            - receives the alert, notifies a fraud analyst
 ```
 
-`common-library` sits alongside all three services — it holds the shared
-`TransactionEvent` and `FraudAlertEvent` classes, so every service agrees
-on exactly what a transaction and an alert look like.
+All messaging runs through an **ActiveMQ Artemis** broker, hosted in Docker.
+`common-library` is a shared Maven module holding `TransactionEvent` and
+`FraudAlertEvent` — the two message contracts every service depends on, so
+producers and consumers never drift out of sync on message shape.
 
-## Project Structure
+## How It Works
 
-```
-transact-alert/
-├── common-library/         shared event classes (Transaction, FraudAlert)
-├── transaction-service/    REST API — accepts transactions, publishes to queue
-├── fraud-service/          consumer — checks fraud rules, publishes alerts
-├── notification-service/   consumer — notifies on alerts
-├── infrastructure/         docker-compose.yml — starts the Artemis broker
-└── README.md
-```
-
-## Install / Prerequisites
-
-- Java 17
-- Maven
-- Docker + Docker Compose (runs the ActiveMQ Artemis broker)
-
-## Running the Project
-
-```bash
-# 1. Start the message broker
-cd infrastructure
-docker compose up -d
-
-# 2. Build the shared library first — the other services depend on it
-cd ../common-library
-mvn clean install
-
-# 3. Run each service in its own terminal
-cd ../transaction-service
-mvn spring-boot:run
-
-cd ../fraud-service
-mvn spring-boot:run
-
-cd ../notification-service
-mvn spring-boot:run
-```
-
-## API Usage
-
-**Submit a transaction:**
+**1. Transaction submitted**
 
 ```
 POST /transactions
 Content-Type: application/json
 
 {
-  "transactionId": "TX1001",
-  "customerId": "C001",
-  "amount": 85000,
-  "currency": "ZAR",
-  "merchant": "Online Store"
+  "customerId": "C004",
+  "amount": 25000,
+  "merchant": "Unknown Merchant",
+  "location": "Bloemfontein"
 }
 ```
 
-**Response (immediate — before fraud checking happens):**
+`transaction-service` validates the request, generates a transaction ID,
+publishes a `TransactionEvent` to `fraud.queue`, and responds immediately:
 
-```json
-{
-  "status": "Transaction accepted for processing"
-}
+```
+Transaction accepted: 193ebeac-065a-436c-aa3c-3ace05b57587
 ```
 
-Fraud checking and any resulting alert happen asynchronously after this
-response is returned.
+**2. Fraud analysis**
+
+`fraud-service` consumes the event and scores it:
+
+- amount exceeds a defined threshold → +50
+- merchant matches a known high-risk pattern → +30
+
+A transaction scoring 50 or higher is published as a `FraudAlertEvent` to
+`fraud.alerts`.
+
+**3. Notification**
+
+`notification-service` consumes the alert and represents the point where a
+real system would page a fraud analyst or open a case:
+
+```
+Notifying fraud analyst: Transaction 193ebeac-... flagged with risk score 80
+```
+
+## Project Structure
+
+```
+transact-alert/
+├── common-library/            shared event contracts
+│   └── event/                 TransactionEvent, FraudAlertEvent
+├── transaction-service/       REST API
+│   ├── controller/            handles POST /transactions
+│   ├── model/                 request DTO + validation
+│   └── producer/               publishes to fraud.queue
+├── fraud-service/             fraud analysis
+│   ├── consumer/               listens on fraud.queue
+│   ├── rules/                 risk-scoring logic
+│   └── producer/               publishes to fraud.alerts
+├── notification-service/      alerting
+│   └── consumer/               listens on fraud.alerts
+├── infrastructure/
+│   └── docker-compose.yml     ActiveMQ Artemis broker
+└── README.md
+```
+
+## Technology Stack
+
+| Layer          | Technology                    |
+|-----------------|--------------------------------|
+| Language        | Java 17                        |
+| Framework       | Spring Boot 3.2.0              |
+| Build           | Maven (multi-module)           |
+| Messaging       | JMS, ActiveMQ Artemis          |
+| API             | REST / JSON over HTTP          |
+| Validation      | Jakarta Bean Validation        |
+| Infrastructure  | Docker, Docker Compose         |
+
+## Running the Project
+
+```bash
+# 1. Start the broker
+cd infrastructure
+docker compose up -d
+
+# 2. Build the shared library (required by all three services)
+cd ../common-library
+mvn clean install
+
+# 3. Run each service in its own terminal
+cd ../transaction-service   && mvn spring-boot:run
+cd ../fraud-service         && mvn spring-boot:run
+cd ../notification-service  && mvn spring-boot:run
+
+# 4. Submit a transaction
+curl -X POST http://localhost:8081/transactions \
+  -H "Content-Type: application/json" \
+  -d '{"customerId": "C004", "amount": 25000, "merchant": "Unknown Merchant", "location": "Bloemfontein"}'
+```
+
+Watch `fraud-service`'s and `notification-service`'s logs to see the
+transaction scored and the alert delivered, live.
 
 ## Skills Demonstrated
 
-- REST API design with Spring Boot
-- Asynchronous, event-driven architecture
-- JMS messaging with ActiveMQ Artemis
-- Producer/consumer patterns
-- Service decoupling across multiple independently-runnable services
-- Shared contract design via a common library
+- Design and implementation of an event-driven, multi-service architecture
+- REST API development with Spring Boot, including request validation
+- Asynchronous messaging with JMS and ActiveMQ Artemis
+- Producer/consumer pattern across three independently deployable services
+- Shared contract design via a common Maven module
+- Rule-based fraud detection with weighted risk scoring
+- Multi-module Maven project structuring
+- Debugging real distributed-systems issues: broker authentication,
+  classpath/build errors, and transient connection recovery
 
-## Tech Stack
+## Future Improvements
 
-- Java 17, Spring Boot, Maven
-- REST / JSON over HTTP
-- JMS, ActiveMQ Artemis
-- Docker / Docker Compose
+- Persist transactions, alerts, and rule history in PostgreSQL
+- Structured logging and centralized error handling
+- Automated test coverage (JUnit, Spring Boot Test)
+- Containerize all services and orchestrate with Kubernetes
+- Expand fraud detection with velocity checks, geolocation anomaly
+  detection, and ML-based risk scoring
+- Replace `System.out.println` notifications with real integrations
+  (email, SMS, or a case-management system)
 
-## Roadmap
+## Author
 
-- [x] Project setup
-- [ ] `common-library` — shared event classes
-- [ ] `transaction-service` — REST API + JMS producer
-- [ ] `fraud-service` — JMS consumer + fraud rules + alert producer
-- [ ] `notification-service` — JMS consumer for alerts
-- [ ] Persistence (PostgreSQL)
-- [ ] Automated tests
+Benit Matumona
+GitHub: https://github.com/benitmatumona
