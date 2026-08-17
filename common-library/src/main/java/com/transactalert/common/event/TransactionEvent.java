@@ -1,5 +1,7 @@
 package com.transactalert.common.event;
 
+import java.io.Serializable;
+
 public class TransactionEvent implements Serializable{
     private final String transactionId;
     private final String customerId;
@@ -20,8 +22,6 @@ public class TransactionEvent implements Serializable{
         this.merchant = merchant;
         this.location = location; 
     }
-
-    public TransactionEvent() {};
 
     public String getTransactionId(){
         return transactionId;

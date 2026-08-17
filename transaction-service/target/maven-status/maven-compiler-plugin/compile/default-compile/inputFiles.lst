@@ -1,0 +1,4 @@
+/home/wtc/transact-alert-rebuild/transaction-service/src/main/java/com/transactalert/transaction/TransactionServiceApplication.java
+/home/wtc/transact-alert-rebuild/transaction-service/src/main/java/com/transactalert/transaction/model/TransactionRequest.java
+/home/wtc/transact-alert-rebuild/transaction-service/src/main/java/com/transactalert/transaction/producer/TransactionProducer.java
+/home/wtc/transact-alert-rebuild/transaction-service/src/main/java/com/transactalert/transaction/controller/TransactionController.java
